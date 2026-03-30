@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Serpentia: Dynamic Population Drift</title>
+    <style>
+        :root { --bg-blue: #d9e9f6; --border-grey: #666; --purple: #9c27b0; --green: #4eb84e; }
+        body { font-family: sans-serif; background: #fff; display: flex; justify-content: center; padding: 20px; }
+        
+        #simulation-container { position: relative; width: 850px; height: 650px; }
+
+        /* Islets Layout */
+        .islet-column { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; gap: 15px; }
+        .islet-box { width: 200px; height: 85px; border: 1.5px solid var(--border-grey); position: relative; background: #fff; }
+        .islet-label { font-size: 11px; position: absolute; top: -14px; left: 50%; transform: translateX(-50%); font-weight: bold; }
+
+        /* Main Chart Area */
+        .main-chart { position: absolute; right: 0; top: 50px; width: 550px; height: 280px; background-color: var(--bg-blue); border: 1.5px solid var(--border-grey); }
+        .axis-label { text-align: center; font-size: 14px; margin-top: 5px; }
+
+        /* Pop-up Box */
+        #instruction-modal { position: absolute; top: 70px; left: 120px; width: 480px; background: white; border: 1px solid #999; border-radius: 8px; box-shadow: 4px 4px 10px rgba(0,0,0,0.2); padding: 20px; z-index: 10; }
+        .close-btn { position: absolute; top: 5px; right: 8px; cursor: pointer; }
+
+        /* Controls */
+        .bottom-controls { position: absolute; bottom: 0; width: 100%; text-align: center; border-top: 1px solid #eee; padding-top: 15px; }
+        .btn-row { margin-bottom: 15px; font-size: 18px; user-select: none; }
+        .btn-row span { margin: 0 20px; cursor: pointer; color: #000; text-decoration: underline; }
+        .btn-row span:hover { color: #4a90e2; }
+        .input-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; max-width: 600px; margin: 0 auto; font-size: 13px; text-align: left; }
+        input { width: 70px; border: 1px solid #999; padding: 2px; }
+
+        canvas { width: 100%; height: 100%; }
+        .time-label { position: absolute; top: 25px; right: 0; font-size: 16px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div id="simulation-container">
+    <div class="time-label" id="timeDisplay">Time = 0</div>
+
+    <div class="islet-column">
+        <div class="islet-box"><span class="islet-label">Islet 1</span><canvas id="islet1"></canvas></div>
+        <div class="islet-box"><span class="islet-label">Islet 2</span><canvas id="islet2"></canvas></div>
+        <div class="islet-box"><span class="islet-label">Islet 3</span><canvas id="islet3"></canvas></div>
+        <div class="islet-box"><span class="islet-label">Islet 4</span><canvas id="islet4"></canvas></div>
+        <div class="islet-box"><span class="islet-label">Islet 5</span><canvas id="islet5"></canvas></div>
+    </div>
+
+    <div class="main-chart">
+        <canvas id="mainCanvas"></canvas>
+        <div class="axis-label">Number of vertebrae</div>
+    </div>
+
+    <div id="instruction-modal">
+        <span class="close-btn" onclick="this.parentElement.style.display='none'">[x]</span>
+        <p style="margin: 0; line-height: 1.4; font-size: 14px;">
+            Enter values for population size, standard deviation, and immigration size. 
+            Click <b>Initialize</b> to generate the main population, then <b>Start/Stop</b> to begin the colonization of islets.
+        </p>
+    </div>
+
+    <div class="bottom-controls">
+        <div class="btn-row">
+            <span onclick="toggleSim()"><b>Start/Stop</b></span>
+            <span onclick="initSim()"><b>Initialize</b></span>
+            <span><b>Help</b></span>
+        </div>
+        <div class="input-grid">
+            <div>Main island population size: <input type="number" id="popSize" value="100000"></div>
+            <div>Main island standard deviation: <input type="number" id="sdVal" value="5"></div>
+            <div>Islet immigration size: <input type="number" id="immiVal" value="10"></div>
+            <div>Mutation Rate (Prob): <input type="number" id="mutRate" value="0.04" step="0.01"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let running = false;
+    let time = 0;
+    let interval;
+    let mainData = [];
+    let isletData = [[], [], [], [], []];
+
+    function boxMuller() {
+        let u = 0, v = 0;
+        while(u === 0) u = Math.random();
+        while(v === 0) v = Math.random();
+        return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+    }
+
+    function initSim() {
+        running = false;
+        clearInterval(interval);
+        time = 0;
+        document.getElementById('timeDisplay').innerText = `Time = 0`;
+        
+        const size = parseInt(document.getElementById('popSize').value);
+        const sd = parseFloat(document.getElementById('sdVal').value);
+        const immiSize = parseInt(document.getElementById('immiVal').value);
+
+        // Generate Main Population
+        mainData = [];
+        for(let i=0; i<size; i++) {
+            let val = Math.round(200 + boxMuller() * sd);
+            if(val >= 170 && val <= 230) mainData.push(val);
+        }
+
+        // Initial Islet Sampling (Founder Effect)
+        for(let i=0; i<5; i++) {
+            isletData[i] = [];
+            for(let j=0; j<immiSize; j++) {
+                isletData[i].push(mainData[Math.floor(Math.random() * mainData.length)]);
+            }
+        }
+
+        renderAll();
+    }
+
+    function renderAll() {
+        drawHistogram('mainCanvas', mainData, '#4eb84e', true);
+        for(let i=0; i<5; i++) {
+            drawHistogram(`islet${i+1}`, isletData[i], '#9c27b0', false);
+        }
+    }
+
+    function drawHistogram(id, data, color, isMain) {
+        const canvas = document.getElementById(id);
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        const counts = {};
+        data.forEach(x => counts[x] = (counts[x] || 0) + 1);
+        const max = Math.max(...Object.values(counts), 1);
+
+        const binWidth = canvas.width / 61;
+        for(let v=170; v<=230; v++) {
+            if(counts[v]) {
+                let h = (counts[v] / max) * (canvas.height * 0.8);
+                ctx.fillStyle = color;
+                ctx.fillRect((v-170)*binWidth, canvas.height - h, binWidth - 1, h);
+            }
+        }
+
+        if(isMain) {
+            ctx.fillStyle = "#000";
+            ctx.font = "12px sans-serif";
+            ctx.fillText("170", 5, canvas.height - 5);
+            ctx.fillText("200", canvas.width/2 - 10, canvas.height - 5);
+            ctx.fillText("230", canvas.width - 25, canvas.height - 5);
+        }
+    }
+
+    function toggleSim() {
+        running = !running;
+        if(running) {
+            interval = setInterval(() => {
+                time++;
+                document.getElementById('timeDisplay').innerText = `Time = ${time}`;
+                evolveIslets();
+                renderAll();
+            }, 100);
+        } else {
+            clearInterval(interval);
+        }
+    }
+
+    function evolveIslets() {
+        const mutProb = parseFloat(document.getElementById('mutRate').value);
+        isletData = isletData.map(pop => {
+            // Grow or maintain population via drift
+            let nextGen = [];
+            let targetSize = 1000; // Small island carrying capacity
+            for(let i=0; i < (pop.length < targetSize ? pop.length * 1.2 : targetSize); i++) {
+                let parent = pop[Math.floor(Math.random() * pop.length)];
+                // Mutation logic
+                if(Math.random() < mutProb) {
+                    parent += (Math.random() > 0.5 ? 1 : -1);
+                }
+                nextGen.push(parent);
+            }
+            return nextGen;
+        });
+    }
+
+    initSim();
+</script>
+
+</body>
+</html>
